@@ -2,14 +2,23 @@
 #define _UTILS_CPP
 
 #include <string>
+#include <cstring>
+#include <memory>
+#include <algorithm>
+#include <limits.h>
+#include <random>
+#include <numeric>
+#include <atomic>
+#include <chrono>
 #include <vector>
+#include <iterator>
+#include <mkl_vsl.h>
+#include <mkl_vml_functions.h>
 #ifdef _OPENMP
 #include <omp.h>
 #else
 #define omp_get_max_threads() 1
-#define omp_get_num_threads() 1
 #define omp_get_thread_num()  0
-#define omp_in_parallel()     0
 #endif
 
 namespace ideep {
@@ -24,6 +33,7 @@ public:
   using const_reference = typename std::vector<T, Alloc>::const_reference;
 
   s_vector() : n_elems_(0), storage_() {}
+
   explicit s_vector(size_type count, const Alloc& alloc = Alloc())
     : n_elems_(count) {
     Alloc dup_alloc(alloc);
@@ -35,6 +45,7 @@ public:
       dup_alloc.deallocate(p, count);
     });
   }
+
   s_vector(std::initializer_list<T> init, const Alloc& alloc = Alloc())
     : storage_(init.size(), alloc) {
       auto arr = storage_.get();
@@ -43,25 +54,28 @@ public:
         arr[i] = src[i];
   }
 
-  s_vector(const s_vector& other) : n_elems_(other.n_elems_),
-    storage_(other.storage_) {}
-  s_vector(s_vector &&other) noexcept : n_elems_(other.n_elems_),
-    storage_(std::move(other.storage_)) {}
+  s_vector(const s_vector& other)
+    : n_elems_(other.n_elems_), storage_(other.storage_) {}
+
+  s_vector(s_vector &&other) noexcept
+    : n_elems_(other.n_elems_), storage_(std::move(other.storage_)) {}
 
   s_vector& operator=(const s_vector &other) {
     storage_ = other.storage_;
     n_elems_ = other.n_elems_;
     return *this;
   }
+
   s_vector& operator=(s_vector&& other) noexcept {
     storage_ = std::move(other.storage_);
     n_elems_ = other.n_elems_;
     return *this;
   }
 
-  reference operator[]( size_type pos ) {
+  reference operator[](size_type pos) {
     return storage_.get()[pos];
   }
+
   const_reference operator[] (size_type pos) const {
     return storage_.get()[pos];
   }
@@ -69,173 +83,192 @@ public:
   size_type size() const noexcept {
     return n_elems_;
   }
+
+  void assign(size_type count, const T& val, const Alloc& alloc = Alloc()) {
+    Alloc dup_alloc(alloc);
+
+    storage_.reset(new (dup_alloc.allocate(count)) T [count] (),
+       [dup_alloc, count](T *p) mutable {
+      for (int i =0; i < count; i ++)
+        p[i].~T();
+      dup_alloc.deallocate(p, count);
+    });
+
+    auto* elems = storage_.get();
+    for (int i =0; i < count; i ++)
+      elems[i] = val;
+
+    n_elems_ = count;
+  }
+
 protected:
   size_type n_elems_;
   std::shared_ptr<T> storage_;
 };
 
-// Fast alternative to heavy string method
 using bytestring = std::string;
 
-inline bytestring to_bytes(const int arg) {
+inline void to_bytes(bytestring& bytes, const int arg) {
   auto as_cstring = reinterpret_cast<const char *>(&arg);
 #ifndef __AVX__
-  if (arg == 0)
-    return bytestring();
-
+  if (arg == 0) return;
   auto len = sizeof(arg) - (__builtin_clz(arg) / 8);
 #else
   unsigned int lz;
   asm volatile ("lzcntl %1, %0": "=r" (lz): "r" (arg));
   auto len = sizeof(int) - lz / 8;
 #endif
-
-  return bytestring(as_cstring, len);
+  bytes.append(as_cstring, len);
 }
 
-inline bytestring to_bytes(const float arg) {
-  auto as_cstring = reinterpret_cast<const char *>(&arg);
-  return bytestring(as_cstring, sizeof(float));
+inline void to_bytes(bytestring& bytes, const bool arg) {
+  to_bytes(bytes, arg ? 1 : 0);
+  bytes.append(1, 'x');
 }
 
-inline bytestring to_bytes(const uint64_t arg) {
+inline void to_bytes(bytestring& bytes, const float arg) {
   auto as_cstring = reinterpret_cast<const char *>(&arg);
-  return bytestring(as_cstring, sizeof(uint64_t));
+  bytes.append(as_cstring, sizeof(float));
+}
+
+inline void to_bytes(bytestring& str, const uint64_t arg) {
+  auto as_cstring = reinterpret_cast<const char *>(&arg);
+  str.append(as_cstring, sizeof(uint64_t));
 }
 
 template <typename T>
-inline bytestring to_bytes(const std::vector<T> arg) {
-  bytestring bytes;
-  bytes.reserve(arg.size() * sizeof(T));
-
-  for (T elems : arg) {
-    bytes.append(to_bytes(elems));
+inline void to_bytes(bytestring& bytes, const std::vector<T> arg) {
+  if (arg.size() > 0) {
+    for (T elems : arg) {
+      to_bytes(bytes, elems);
+      bytes.append(1, 'x');
+    }
+    bytes.pop_back();
+  } else {
     bytes.append(1, 'x');
   }
-
-  bytes.pop_back();
-
-  return bytes;
 }
 
-template <typename T, typename =
-  typename std::enable_if<std::is_enum<T>::value>::type>
-inline bytestring to_bytes(T arg) {
-  return std::to_string(static_cast<int>(arg));
+inline void to_bytes(bytestring& bytes, const tensor arg) {
+  auto* arg_desc = arg.get_mkldnn_memory_desc_t();
+  for (int i = 0; i < arg_desc->ndims; i++) {
+    to_bytes(bytes, static_cast<uint64_t>(arg_desc->layout_desc.blocking.strides[0][i]));
+    to_bytes(bytes, static_cast<uint64_t>(arg_desc->layout_desc.blocking.strides[1][i]));
+    to_bytes(bytes, arg_desc->layout_desc.blocking.block_dims[i]);
+    to_bytes(bytes, arg_desc->layout_desc.blocking.padding_dims[i]);
+    to_bytes(bytes, arg_desc->layout_desc.blocking.offset_padding_to_data[i]);
+    to_bytes(bytes, arg_desc->dims[i]);
+  }
+  to_bytes(bytes, static_cast<uint64_t>(arg_desc->layout_desc.blocking.offset_padding));
+  to_bytes(bytes, arg_desc->data_type);
+  to_bytes(bytes, arg_desc->format);
 }
 
-template <typename T, typename =
-  typename std::enable_if< std::is_class<T>::value>::type, typename = void>
-inline bytestring to_bytes(const T arg) {
-  return arg.to_bytes();
+template <typename T, typename = typename std::enable_if<std::is_enum<T>::value>::type>
+inline void to_bytes(bytestring& bytes, T arg) {
+  to_bytes(bytes, static_cast<int>(arg));
 }
 
-enum algorithm {
-  F_UNDEF = 0,
-  F_CONV_FWD,
-  F_RELU_FWD,
-  F_BN_FWD,
-  F_SUM,
-  F_LAST,
-};
-
-enum fusion_type {
-  FUSION_UNKNOWN = 0,
-  FUSION_CONV_RELU,
-  FUSION_CONV_SUM,
-  FUSION_MAX,
-};
-
-template<typename T, typename U>
-inline T div_up(const T a, const U b) {
-    assert(b);
-    return(a + b - 1) / b;
+template <typename T, typename = typename std::enable_if<std::is_class<T>::value>::type, typename = void>
+inline void to_bytes(bytestring& bytes, const T arg) {
+  arg.to_bytes(bytes);
 }
-template <typename T, typename U>
-inline void balance211(T n, U team, U tid, T &n_start, T &n_end) {
-    T n_min = 1;
-    T &n_my = n_end;
-    if (team <= 1 || n == 0) {
-        n_start = 0;
-        n_my = n;
-    } else if (n_min == 1) {
-        // team = T1 + T2
-        // n = T1*n1 + T2*n2  (n1 - n2 = 1)
-        T n1 = div_up(n, (T)team);
-        T n2 = n1 - 1;
-        T T1 = n - n2 * (T)team;
-        n_my = (T)tid < T1 ? n1 : n2;
-        n_start = (T)tid <= T1 ? tid * n1 : T1 * n1 + ((T)tid - T1) * n2;
+
+template <typename T, typename ...Ts>
+inline void to_bytes(bytestring& bytes, T&& arg, Ts&&... args) {
+  to_bytes(bytes, std::forward<T>(arg));
+  bytes.append(1, '*');
+  to_bytes(bytes, std::forward<Ts>(args)...);
+}
+
+template <typename ...Ts>
+inline void create_key(key_t& key_to_create, Ts&&... args) {
+  to_bytes(key_to_create, std::forward<Ts>(args)...);
+}
+
+#define check_or_create_k(key, ...) \
+  if (key.empty()) { utils::create_key(key, __VA_ARGS__); }
+
+static void bernoulli_generate(const long n, const double p, int* r) {
+  std::srand(std::time(0));
+  const int seed = 17 + std::rand() % 4096;
+
+  int nthr = omp_get_max_threads();
+  # pragma omp parallel num_threads(nthr)
+  {
+    const int ithr = omp_get_thread_num();
+    const long avg_amount = (n + nthr - 1) / nthr;
+    const long my_offset = ithr * avg_amount;
+    const long my_amount = std::min(my_offset + avg_amount, n) - my_offset;
+
+    if (my_amount > 0) {
+      VSLStreamStatePtr stream;
+      vslNewStream(&stream, VSL_BRNG_MCG31, seed);
+      vslSkipAheadStream(stream, my_offset);
+      viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, my_amount, r + my_offset, p);
+      vslDeleteStream(&stream);
     }
-
-    n_end += n_start;
+  }
 }
 
-inline void fast_memcpy(char* data_o, char *data_i, size_t len)
-{
-    size_t nelems_float = len / 4;
-    size_t nelems_char = len % 4;
-    const int block_size = 16;
-    const auto num_blocks_float = nelems_float / block_size;
-    const auto rem_elems_float =  nelems_float % block_size;
-    float* output_f = (float*)data_o;
-    float* input_f = (float*) data_i;
-    char* output_c = (char*) data_o;
-    char* input_c = (char*) data_i;
-#   pragma omp parallel
-    {
-        const int ithr = omp_get_thread_num();
-        const int nthr = omp_get_num_threads();
-        size_t start{0}, end{0};
-        balance211(num_blocks_float, nthr, ithr, start, end);
-        start = start * block_size;
-        end = end * block_size;
-#       pragma omp simd
-        for (size_t e = start; e < end; ++e) {
-            output_f[e] = input_f[e];
-        }
-        if (rem_elems_float != 0 && ithr ==  nthr -1 )  {
-            for (auto e = nelems_float - rem_elems_float; e < nelems_float; ++e) {
-                output_f[e] = input_f[e];
-            }
-        }
-        if (nelems_char != 0 && ithr ==  nthr -1){
-            for (auto e = nelems_float*4; e < len; ++e) {
-                output_c[e] = input_c[e];
-            }
-        }
+static inline tensor::dims get_compatible_dilates(const tensor::dims& dilates) {
+    if (!dilates.empty() && !IDEEP_STD_ANY_LE(dilates, 0)) {
+      auto dilates_in = dilates;
+      IDEEP_STD_EACH_SUB(dilates_in, 1);
+      return dilates_in;
     }
-    return;
+    return {0, 0};
 }
 
-template<typename data_type_t>
-inline void fast_memset(data_type_t *data_o, data_type_t val, size_t len)
-{
-    size_t nelems_float = len;
-    const int block_size = 16;
-    const auto num_blocks_float = nelems_float / block_size;
-    const auto rem_elems_float =  nelems_float % block_size;
-    float *output_f = (float *)data_o;
-#   pragma omp parallel
-    {
-        const int ithr = omp_get_thread_num();
-        const int nthr = omp_get_num_threads();
-        size_t start{0}, end{0};
-        balance211(num_blocks_float, nthr, ithr, start, end);
-        start = start * block_size;
-        end = end * block_size;
-#       pragma omp simd
-        for (size_t e = start; e < end; ++e) {
-            output_f[e] = val;
-        }
-        if (rem_elems_float != 0 && ithr ==  nthr -1 )  {
-            for (auto e = nelems_float - rem_elems_float; e < nelems_float; ++e) {
-                output_f[e] = val;
-            }
-        }
-    }
-    return;
+static void inline validate_dims() {}
+
+template<typename... Ts>
+static void inline validate_dims(const tensor::dims& dims, Ts&... rest) {
+#ifndef NDEBUG
+  if (dims.size() > TENSOR_MAX_DIMS) {
+    error::wrap_c_api(mkldnn_invalid_arguments, "Invalid dimesions");
+  }
+  validate_dims(rest...);
+#endif
 }
+
+#ifdef USE_EULER
+static inline int euler_format(const tensor::descriptor &desc) {
+  switch (desc.get_internal_format()) {
+    case mkldnn_nchw:
+      return euler::nchw;
+    case mkldnn_nhwc:
+      return euler::nhwc;
+    case mkldnn_nChw16c:
+      return euler::nChw16c;
+    case mkldnn_oihw:
+      return euler::oihw;
+    case mkldnn_hwio:
+      return euler::hwio;
+    case mkldnn_OIhw16i16o:
+      return euler::OIhw16i16o;
+    default:
+      printf("errpr_format: %d/%d\n", int(desc.get_internal_format()), (int)mkldnn_OIhw16i16o);
+      throw error(mkldnn_invalid_arguments, "Unsupported data format in euler!");
+  }
+}
+
+// FIXME: Only support inference in euler so far
+static inline int euler_prop_kind(prop_kind aprop_kind) {
+  switch (aprop_kind) {
+    //case prop_kind::forward_training:
+    case prop_kind::forward_inference:
+      return euler::prop_kinds::forward_inference;
+    case prop_kind::backward_data:
+      return euler::prop_kinds::backward_data;
+    case prop_kind::backward_weights:
+      return euler::prop_kinds::backward_weights;
+    default:
+      throw error(mkldnn_invalid_arguments, "Unsupported prop kind in euler!");
+  }
+}
+#endif
+
 
 }
 }
