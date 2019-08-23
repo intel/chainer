@@ -2,7 +2,7 @@
 #define IDEEP_HPP
 
 #ifdef USE_EULER
-#include "euler.hpp"
+//#include "euler.hpp"
 #endif
 
 #include "abstract_types.hpp"
