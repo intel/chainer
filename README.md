@@ -1,11 +1,11 @@
-# Chainer Backend for Intel Architecture
+# Intel® Optimization for Chainer* 
 
-A Chainer module providing numpy like API and DNN acceleration using MKL-DNN.
+Chainer Backend for Intel Architecture, a Chainer module providing numpy like API and DNN acceleration using MKL-DNN.
 
 
 ## Requirements
 
-This preview version is tested on Ubuntu 16.04 and OS X.
+This preview version is tested on Ubuntu 16.04, Centos 7.4 and OS X.
 
 Minimum requirements:
 - cmake 3.0.0+
@@ -24,31 +24,51 @@ Other requirements:
 
 ## Installation
 
+### Install setuptools:
 If you use old ``setuptools``, upgrade it:
 
 ```
 pip install -U setuptools
 ```
 
-Install python package from the source code:
+### Install python package from the source code:
 
 CentOS:
 ```
-git submodule update --init && mkdir build && cd build && cmake3 ..
+git submodule update --init && mkdir build && cd build
+cmake3 -DWITH_TEST=OFF ..
 cd ../python
 python setup.py install
 
 ```
 Other:
 ```
-git submodule update --init && mkdir build && cd build && cmake ..
+git submodule update --init && mkdir build && cd build
+cmake3 -DWITH_TEST=OFF ..
 cd ../python
 python setup.py install
 ```
+### Install python package via PYPI:
+```
+pip install ideep4py
+```
+Since Python3.7 doesn't work with numpy==1.13, we built iDeep4py Python3.7 wheel based on numpy==1.16.0, remember to upgrade numpy version to 1.16.0 before install iDeep4py Python3.7 wheel.
+Suggest installing Python package using [virtualenv](https://packaging.python.org/key_projects/#virtualenv) to avoid installing Python packages globally which could break system tools or other projects.
+### Install python package via Conda:
 
-**Multinode support:**
+```
+conda install -c intel ideep4py
+```
+### Install python package via Docker: 
+We are providing the official Docker images based on different platforms on [Docker Hub](https://hub.docker.com/r/chainer/chainer/tags). 
+```
+docker pull chainer/chainer:latest-intel-python2
+docker run -it chainer/chainer:latest-intel-python2 /bin/bash
+```
 
-IDeep provide non-blocking multinode data parallelism support.  The system is requried to meet MPICH dependency and user needs to replace the cmake command in build process:
+## Multinode support:
+
+Non-blocking multinode data parallelism is supported.  The system is requried to meet MPICH dependency and user needs to replace the cmake command in build process:
 
 Make sure your MPI executable is in PATH:
 
@@ -73,7 +93,7 @@ mpirun -f <hostlist> -N 4 python3 test_1payload_inplace.py
 ```
 
 ## More information
-- MKL-DNN github: https://gitlab.devtools.intel.com/ipl/mkl-dnn
+- MKL-DNN github: https://github.com/01org/mkl-dnn
 - Chainer github: https://github.com/chainer/chainer
 
 ## License
