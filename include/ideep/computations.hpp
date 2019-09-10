@@ -761,7 +761,7 @@ struct convolution_forward: public computation,
     void *scratch_pad;
     int conv_algorithm;
     std::string dst_type;
-    std::string shared_workspace_key;
+    std::string name;
     std::vector<int> flatting;
     std::vector<int> blocking;
     std::vector<int> partition;
@@ -1056,7 +1056,7 @@ struct convolution_forward: public computation,
     desc.dims.kh = with_group ? weights_desc.get_dim(3) : weights_desc.get_dim(2);
     desc.dims.kw = with_group ? weights_desc.get_dim(4) : weights_desc.get_dim(3);
     desc.with_argmax = eparam.with_argmax;
-    desc.shared_workspace_key = eparam.shared_workspace_key;
+    desc.name = eparam.name;
 
     tdims_t pads = {padding_l[1], padding_r[1], padding_l[0], padding_r[0]};
     IDEEP_TO_EULER_4DIMS(pads, desc.pads);
