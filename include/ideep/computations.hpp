@@ -770,6 +770,8 @@ struct convolution_forward: public computation,
     std::vector<float> output_quant;
     std::vector<float> sum_quant;
     bool with_argmax;
+    bool eager_mode;
+    bool stream_sync;
     ideep::format dst_format;
   };
 
@@ -1115,6 +1117,8 @@ struct convolution_forward: public computation,
     desc.execution_mode = eparam.execution_mode;
     desc.scratch_pad = eparam.scratch_pad;
     desc.use_scratch_pad = eparam.scratch_pad == nullptr ? false : true;
+    desc.eager_mode = eparam.eager_mode;
+    desc.stream_sync = eparam.stream_sync;
     IDEEP_TO_EULER_2DIMS(eparam.flatting, desc.flatting);
     IDEEP_TO_EULER_2DIMS(eparam.blocking, desc.blocking);
     IDEEP_TO_EULER_2DIMS(eparam.partition, desc.partition);
