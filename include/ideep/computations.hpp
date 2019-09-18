@@ -1069,9 +1069,13 @@ struct convolution_forward: public computation,
         src_desc.get_data_type() == tdtype_t::u8, "Wrong input data type");
     IDEEP_ENFORCE(weights_desc.get_data_type() == tdtype_t::f32 ||
         weights_desc.get_data_type() == tdtype_t::s8, "Wrong weights data type");
-    desc.with_relu = attr.get_post_ops().has_op_kind(kind::eltwise); 
-    desc.relu_bound.lower = eparam.relu_bound_thresh[0];
-    desc.relu_bound.upper = eparam.relu_bound_thresh[1];
+    desc.with_relu = attr.get_post_ops().has_op_kind(kind::eltwise);
+    if (desc.with_relu) { 
+      if (eparam.relu_bound_thresh.size() == 2) {
+        desc.relu_bound.lower = eparam.relu_bound_thresh[0];
+        desc.relu_bound.upper = eparam.relu_bound_thresh[1];
+      }
+    }
     desc.with_ip_sum = attr.get_post_ops().has_op_kind(kind::sum);
     desc.with_op_sum = false;
     desc.f16c_opt = false;
@@ -1203,8 +1207,9 @@ struct convolution_forward: public computation,
 
       auto dst_scales_in = (dst_scales.empty() || dst_data_type == tdtype_t::f32)
         ? IDEEP_DEF_SCALE : dst_scales;
-      eparam.relu_bound_thresh = {eparam.relu_bound_thresh[0] * dst_scales_in[0], 
-                                  eparam.relu_bound_thresh[1] * dst_scales_in[0]};
+      for (int i = 0; i < eparam.relu_bound_thresh.size(); ++i) {
+        eparam.relu_bound_thresh[i] = eparam.relu_bound_thresh[i] * dst_scales_in[0];
+      }
       if (post_ops.has_op_kind(kind::sum)) {
         float sum_scale = dst_scales_in[0] / (dst.has_scale() ? dst.get_scale()[0] : 1.0f);
         eparam.sum_quant[0] = sum_scale;  
