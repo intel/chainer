@@ -247,6 +247,8 @@ static inline int euler_format(const tensor::descriptor &desc) {
       return euler::hwio;
     case mkldnn_OIhw16i16o:
       return euler::OIhw16i16o;
+    case mkldnn_goihw:
+      return euler::goihw;
     default:
       printf("errpr_format: %d/%d\n", int(desc.get_internal_format()), (int)mkldnn_OIhw16i16o);
       throw error(mkldnn_invalid_arguments, "Unsupported data format in euler!");
