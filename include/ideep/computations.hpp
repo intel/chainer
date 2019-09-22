@@ -1128,7 +1128,7 @@ struct convolution_forward: public computation,
     desc.stream_sync = eparam.stream_sync;
     IDEEP_TO_EULER_2DIMS(eparam.flatting, desc.flatting);
     IDEEP_TO_EULER_2DIMS(eparam.blocking, desc.blocking);
-    IDEEP_TO_EULER_2DIMS(eparam.partition, desc.partition);
+    IDEEP_TO_EULER_3DIMS(eparam.partition, desc.partition);
 
     desc.sampling_kind = euler::sampling_kind_t::CALIBRATED;
     if (src_desc.get_data_type() == tdtype_t::u8) {

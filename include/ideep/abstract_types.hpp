@@ -111,6 +111,7 @@ enum lowp_kind {
 
 #define IDEEP_TO_EULER_1DIMS(idims, edims) (edims = {idims[0]})
 #define IDEEP_TO_EULER_2DIMS(idims, edims) (edims = {idims[0], idims[1]})
+#define IDEEP_TO_EULER_3DIMS(idims, edims) (edims = {idims[0], idims[1], idims[2]})
 #define IDEEP_TO_EULER_4DIMS(idims, edims) (edims = {idims[0], idims[1], idims[2], idims[3]})
 
 /// hide other formats
